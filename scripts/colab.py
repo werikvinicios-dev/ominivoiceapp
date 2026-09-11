@@ -66,20 +66,46 @@ def detect_gpu() -> str | None:
     return None
 
 
-def fetch_repo(branch: str = "main") -> Path:
-    """Clona (ou atualiza) o repositório do Studio."""
+def fetch_repo(branch: str = "") -> Path:
+    """Clona (ou atualiza) o repositório do Studio.
+
+    ``branch`` vazio usa a branch padrão do repositório — assim o notebook
+    continua funcionando independentemente de como as branches evoluírem.
+    """
     if REPO_DIR.exists():
         _log(f"Atualizando {REPO_DIR}…")
-        subprocess.run(["git", "-C", str(REPO_DIR), "fetch", "--depth", "1",
-                        "origin", branch], check=False)
-        subprocess.run(["git", "-C", str(REPO_DIR), "checkout", branch], check=False)
-        subprocess.run(["git", "-C", str(REPO_DIR), "reset", "--hard",
-                        f"origin/{branch}"], check=False)
+        target = branch or _default_branch()
+        subprocess.run(
+            ["git", "-C", str(REPO_DIR), "fetch", "--depth", "1", "origin", target],
+            check=False,
+        )
+        subprocess.run(
+            ["git", "-C", str(REPO_DIR), "checkout", "-B", target,
+             f"origin/{target}"],
+            check=False,
+        )
     else:
         _log(f"Clonando o OmniVoice Studio em {REPO_DIR}…")
-        _run(["git", "clone", "--depth", "1", "--branch", branch,
-              REPO_URL, str(REPO_DIR)])
+        command = ["git", "clone", "--depth", "1"]
+        if branch:
+            command += ["--branch", branch]
+        _run([*command, REPO_URL, str(REPO_DIR)])
     return REPO_DIR
+
+
+def _default_branch() -> str:
+    """Branch padrão do repositório remoto (o HEAD do origin)."""
+    try:
+        output = subprocess.run(
+            ["git", "-C", str(REPO_DIR), "remote", "show", "origin"],
+            capture_output=True, text=True, timeout=60, check=False,
+        ).stdout
+        for line in output.splitlines():
+            if "HEAD branch:" in line:
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "main"
 
 
 def install_studio() -> None:
@@ -135,7 +161,7 @@ def mount_drive() -> Path | None:
     return DRIVE_DATA
 
 
-def setup(use_drive: bool = True, branch: str = "main") -> dict:
+def setup(use_drive: bool = True, branch: str = "") -> dict:
     """Prepara tudo e devolve o resumo do ambiente."""
     gpu = detect_gpu()
     if gpu:

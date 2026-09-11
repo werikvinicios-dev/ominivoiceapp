@@ -31,7 +31,7 @@ Sem login: os dados ficam na máquina que roda o servidor (ou no seu Drive).
 ## Caminho 1 — Google Colab (recomendado, só com o celular)
 
 1. Abra **[`OmniVoice_Studio_Colab.ipynb`](OmniVoice_Studio_Colab.ipynb)** no
-   [Google Colab](https://colab.research.google.com/github/werikvinicios-dev/ominivoiceapp/blob/main/OmniVoice_Studio_Colab.ipynb)
+   [Google Colab](https://colab.research.google.com/github/werikvinicios-dev/ominivoiceapp/blob/claude/compassionate-clarke-eftt77/OmniVoice_Studio_Colab.ipynb)
 2. **Ambiente de execução → Alterar o tipo de ambiente → GPU (T4)**
 3. **Ambiente de execução → Executar tudo**
 4. Autorize o Google Drive quando ele pedir
