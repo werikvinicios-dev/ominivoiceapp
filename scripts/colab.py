@@ -229,8 +229,19 @@ def _tunnel_is_live(url: str, attempts: int = 6, delay: float = 5.0) -> bool:
     return False
 
 
+def _tunnel_log() -> Path:
+    base = Path("/content") if Path("/content").is_dir() else Path.cwd()
+    return base / "cloudflared.log"
+
+
 def _start_cloudflared(port: int, protocol: str | None, timeout: float = 60.0):
-    """Sobe o cloudflared e devolve (url, processo) assim que a URL aparece."""
+    """Sobe o cloudflared e devolve (url, processo) assim que a URL aparece.
+
+    A saída vai para um arquivo, nunca para um ``PIPE``: o cloudflared registra
+    log continuamente e, se ninguém drenasse o pipe, ele travaria ao escrever
+    assim que o buffer do sistema enchesse — e a Cloudflare derrubaria o túnel
+    com erro 1033 no meio do uso.
+    """
     command = [
         str(CLOUDFLARED), "tunnel", "--url", f"http://127.0.0.1:{port}",
         "--no-autoupdate",
@@ -238,20 +249,20 @@ def _start_cloudflared(port: int, protocol: str | None, timeout: float = 60.0):
     if protocol:
         command += ["--protocol", protocol]
 
-    process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
-    )
+    log_path = _tunnel_log()
+    handle = log_path.open("w")
+    process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
+    process._omni_log = handle  # mantém o arquivo aberto enquanto o processo vive
+
     deadline = time.time() + timeout
     while time.time() < deadline:
-        line = process.stdout.readline()
-        if not line:
-            if process.poll() is not None:
-                return None, None
-            continue
-        found = _URL_RE.search(line)
+        if process.poll() is not None:
+            return None, None
+        found = _URL_RE.search(log_path.read_text(errors="replace"))
         if found:
             return found.group(0), process
+        time.sleep(0.5)
+
     process.terminate()
     return None, None
 
@@ -361,3 +372,59 @@ def launch(
         )
 
     return {"server": server, "tunnel": tunnel, "url": url, "log": str(log_path)}
+
+
+def tunnel_alive(session: dict) -> bool:
+    """``True`` se o túnel continua de pé e respondendo."""
+    tunnel = session.get("tunnel")
+    if tunnel is None or tunnel.poll() is not None:
+        return False
+    url = session.get("url")
+    if not url or ".trycloudflare.com" not in url:
+        return True  # proxy do Colab: não há processo para vigiar
+    try:
+        with urllib.request.urlopen(f"{url}/api/status", timeout=15) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def keep_alive(session: dict, port: int = 8080, check_every: float = 30.0) -> None:
+    """Mantém a célula viva e reabre o túnel se ele cair.
+
+    Túneis gratuitos do trycloudflare caem sozinhos de vez em quando; sem isto
+    o usuário veria um erro 1033 e teria de reiniciar tudo na mão.
+    """
+    server = session.get("server")
+    failures = 0
+    try:
+        while server is not None and server.poll() is None:
+            time.sleep(check_every)
+            if session.get("url") is None or tunnel_alive(session):
+                failures = 0
+                continue
+
+            failures += 1
+            _log(f"O túnel caiu (verificação {failures}). Reabrindo…")
+            old = session.get("tunnel")
+            if old is not None and old.poll() is None:
+                old.terminate()
+
+            url, tunnel = _open_tunnel(port)
+            if url:
+                session["url"], session["tunnel"] = url, tunnel
+                _log(f"\n  NOVO ENDEREÇO:  {url}\n")
+                failures = 0
+            elif failures >= 3:
+                _log(
+                    "Não consegui reabrir o túnel. Rode esta célula novamente"
+                    " para tentar de novo."
+                )
+                return
+    except KeyboardInterrupt:
+        _log("Encerrando o Studio…")
+    finally:
+        for key in ("tunnel", "server"):
+            process = session.get(key)
+            if process is not None and process.poll() is None:
+                process.terminate()

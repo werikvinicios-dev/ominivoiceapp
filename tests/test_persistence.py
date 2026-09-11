@@ -201,3 +201,52 @@ def test_colab_launcher_reports_a_missing_gpu_without_crashing():
     # Sem cloudflared instalado, o túnel degrada em silêncio.
     colab.CLOUDFLARED = colab.Path("/nao-existe")
     assert colab._open_tunnel(9) == (None, None)
+
+
+def test_cloudflared_output_never_goes_to_an_unread_pipe():
+    """Um PIPE não drenado trava o cloudflared e derruba o túnel (erro 1033)."""
+    import inspect
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import colab
+
+    source = inspect.getsource(colab._start_cloudflared)
+    assert "subprocess.PIPE" not in source
+    assert "log_path.open" in source
+
+
+def test_keep_alive_stops_when_the_server_dies():
+    """A célula do Colab não pode ficar presa depois que o servidor cai."""
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import colab
+
+    class DeadProcess:
+        def poll(self):
+            return 1
+
+        def terminate(self):
+            pass
+
+    session = {"server": DeadProcess(), "tunnel": None, "url": None}
+    colab.keep_alive(session, check_every=0.01)  # retorna em vez de travar
+
+
+def test_tunnel_alive_detects_a_dead_process():
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import colab
+
+    class DeadProcess:
+        def poll(self):
+            return 1
+
+    assert colab.tunnel_alive({"tunnel": None, "url": "x"}) is False
+    assert colab.tunnel_alive({"tunnel": DeadProcess(), "url": "x"}) is False
+    # O proxy do Colab não tem processo próprio para vigiar.
+    assert colab.tunnel_alive(
+        {"tunnel": DeadProcess.__new__(DeadProcess), "url": "https://colab.internal"}
+    ) is not None

@@ -236,6 +236,9 @@ silêncio digital real), a montagem do WAV, a retomada e a persistência.
   microfone — use o envio de arquivo.
 - **A sessão do Colab é temporária.** Sem o Drive montado, tudo se perde ao
   fim da sessão.
+- **O túnel gratuito do trycloudflare cai de vez em quando** (erro 1033 na
+  página). A célula do notebook detecta a queda em até 30 s, reabre o túnel e
+  imprime o novo endereço.
 
 ## Licença
 
