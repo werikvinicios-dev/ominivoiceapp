@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Ajustes · OmniVoice Studio{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Ajustes</h1>
+
+{% if engine.mock %}
+<div class="alert alert-info">
+  <strong>Modo simulador.</strong> O servidor está sem o modelo OmniVoice, então
+  o áudio gerado é um som sintético — serve para testar a interface, não para
+  produzir fala.
+</div>
+{% endif %}
+
+<div class="card">
+  <h2 class="card-title">Servidor</h2>
+  <table class="info-table">
+    {% for key, value in info.items() %}
+      <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
+    {% endfor %}
+    <tr><td>Vozes salvas</td><td>{{ counts['vozes'] }}</td></tr>
+    <tr><td>Gerações no histórico</td><td>{{ counts['gerações'] }}</td></tr>
+    <tr><td>Versão do app</td><td>{{ version }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2 class="card-title">Usar o modelo de verdade</h2>
+  <p class="small muted">
+    O OmniVoice roda no computador que serve este site — não no celular. Instale
+    o modelo nessa máquina e reinicie o servidor:
+  </p>
+  <pre class="small" style="overflow-x:auto;background:var(--surface-2);padding:12px;border-radius:10px;border:1px solid var(--line)"><code>pip install omnivoice
+OMNI_BACKEND=omnivoice ./run.sh</code></pre>
+  <p class="small muted">
+    Na primeira execução o checkpoint é baixado do HuggingFace (alguns GB).
+    Uma GPU NVIDIA, Apple Silicon ou Intel Arc deixa a geração bem mais rápida.
+  </p>
+</div>
+
+<div class="card">
+  <h2 class="card-title">Instalar no celular</h2>
+  <p class="small muted">
+    No Chrome ou Safari, abra o menu do navegador e escolha
+    <strong>“Adicionar à tela de início”</strong>. O app passa a abrir em tela
+    cheia, sem a barra de endereço.
+  </p>
+</div>
+
+<div class="card">
+  <h2 class="card-title">Sobre</h2>
+  <p class="small muted">
+    Interface web para o <a href="https://github.com/k2-fsa/OmniVoice">OmniVoice</a>,
+    modelo de síntese de voz multilíngue (600+ idiomas) da equipe Next-gen Kaldi
+    da Xiaomi, distribuído sob licença Apache 2.0.
+  </p>
+</div>
+{% endblock %}

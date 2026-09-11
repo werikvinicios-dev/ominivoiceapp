@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Criar áudio · OmniVoice Studio{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Criar áudio</h1>
+
+{% if engine.mock %}
+<div class="alert alert-info small">
+  Nenhum modelo de fala está carregado, então o áudio sai como um som
+  sintético de demonstração. <a href="/ajustes">Como ativar o modelo real</a>.
+</div>
+{% endif %}
+
+<form id="gen-form"
+      hx-post="/gerar"
+      hx-target="#result"
+      hx-swap="innerHTML"
+      hx-disabled-elt="#gen-submit"
+      hx-on::after-request="if(event.detail.successful){this.dispatchEvent(new CustomEvent('queue-changed',{bubbles:true}));document.getElementById('result').scrollIntoView({behavior:'smooth',block:'center'})}">
+
+  <div class="segmented" role="radiogroup" aria-label="Modo de geração">
+    <input type="radio" name="mode" id="mode-auto" value="auto" checked>
+    <label for="mode-auto">Automática</label>
+    <input type="radio" name="mode" id="mode-clone" value="clone">
+    <label for="mode-clone">Clonar voz</label>
+    <input type="radio" name="mode" id="mode-design" value="design">
+    <label for="mode-design">Criar voz</label>
+  </div>
+
+  <div class="card">
+    <label class="field">
+      <span class="label">Texto para falar</span>
+      <textarea name="text" id="gen-text" required
+                maxlength="{{ max_text_chars }}"
+                placeholder="Digite o que você quer ouvir…"></textarea>
+    </label>
+    <p class="hint" style="text-align:right">
+      <span id="char-count">0</span> / {{ max_text_chars }}
+    </p>
+
+    <label class="field" style="margin-bottom:0">
+      <span class="label">Idioma</span>
+      <select name="language">
+        <option value="auto" selected>Detectar automaticamente</option>
+        <optgroup label="Mais usados">
+          {% for lang in featured_languages %}
+            <option value="{{ lang.code }}">{{ lang.name }}</option>
+          {% endfor %}
+        </optgroup>
+        <optgroup label="Todos os idiomas ({{ all_languages | length }})">
+          {% for lang in all_languages %}
+            <option value="{{ lang.code }}">{{ lang.name }}</option>
+          {% endfor %}
+        </optgroup>
+      </select>
+      <p class="hint">Informar o idioma melhora um pouco a pronúncia.</p>
+    </label>
+  </div>
+
+  {# ------------------------------------------------------------ clonagem #}
+  <div class="card" data-mode-panel="clone" hidden>
+    <h2 class="card-title">
+      Voz de referência
+      <a class="btn btn-sm" href="/vozes">Adicionar</a>
+    </h2>
+    {# hx-target explícito: sem ele, htmx herdaria o alvo do formulário. #}
+    <div id="voice-picker"
+         hx-get="/vozes/opcoes"
+         hx-trigger="load, voices-changed from:body"
+         hx-target="this"
+         hx-swap="innerHTML">
+      {% include "partials/voice_options.html" %}
+    </div>
+  </div>
+
+  {# --------------------------------------------------------- voice design #}
+  <div class="card" data-mode-panel="design" hidden>
+    <h2 class="card-title">Características da voz</h2>
+    {% for category in categories %}
+      <label class="field">
+        <span class="label">{{ category.label }}</span>
+        <select name="{{ category.key }}">
+          <option value="">Indiferente</option>
+          {% for option in category.options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+          {% endfor %}
+        </select>
+        {% if category.hint %}<p class="hint">{{ category.hint }}</p>{% endif %}
+      </label>
+    {% endfor %}
+    <label class="field" style="margin-bottom:0">
+      <span class="label">Descrição extra (opcional)</span>
+      <input type="text" name="instruct_extra"
+             placeholder="ex.: narrador calmo, tom de documentário">
+    </label>
+  </div>
+
+  {# ------------------------------------------------------------ avançado #}
+  <details class="accordion">
+    <summary>Ajustes avançados</summary>
+    <div class="accordion-body">
+      <label class="field">
+        <span class="label">Velocidade da fala</span>
+        <div class="slider-row">
+          <input type="range" name="speed" min="0.5" max="1.5" step="0.05"
+                 value="{{ defaults.speed }}" oninput="this.nextElementSibling.value = (+this.value).toFixed(2) + '×'">
+          <output>{{ '%.2f'|format(defaults.speed) }}×</output>
+        </div>
+        <p class="hint">Ignorada se você fixar uma duração abaixo.</p>
+      </label>
+
+      <label class="field">
+        <span class="label">Duração fixa em segundos (opcional)</span>
+        <input type="number" name="duration" min="0.5" max="600" step="0.5"
+               inputmode="decimal" placeholder="deixe vazio para o modelo decidir">
+      </label>
+
+      <label class="field">
+        <span class="label">Passos de inferência</span>
+        <div class="slider-row">
+          <input type="range" name="num_step" min="4" max="64" step="1"
+                 value="{{ defaults.num_step }}" oninput="this.nextElementSibling.value = this.value">
+          <output>{{ defaults.num_step }}</output>
+        </div>
+        <p class="hint">Menos = mais rápido. Mais = melhor qualidade.</p>
+      </label>
+
+      <label class="field">
+        <span class="label">Aderência ao estilo (CFG)</span>
+        <div class="slider-row">
+          <input type="range" name="guidance_scale" min="0" max="4" step="0.1"
+                 value="{{ defaults.guidance_scale }}" oninput="this.nextElementSibling.value = (+this.value).toFixed(1)">
+          <output>{{ '%.1f'|format(defaults.guidance_scale) }}</output>
+        </div>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" name="denoise" value="true" {% if defaults.denoise %}checked{% endif %}>
+        <span>Reduzir ruído na saída</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="preprocess_prompt" value="true" {% if defaults.preprocess_prompt %}checked{% endif %}>
+        <span>Limpar o áudio de referência antes de clonar</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="postprocess_output" value="true" {% if defaults.postprocess_output %}checked{% endif %}>
+        <span>Remover silêncios longos do resultado</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="normalize_text" value="true" {% if defaults.normalize_text %}checked{% endif %}>
+        <span>Ler números e datas por extenso</span>
+      </label>
+    </div>
+  </details>
+
+  <button class="btn btn-primary btn-block" id="gen-submit" type="submit">
+    <span class="spin htmx-indicator"></span>
+    <span class="lbl">Gerar áudio</span>
+  </button>
+</form>
+
+<div id="result" style="margin-top:16px"></div>
+{% endblock %}

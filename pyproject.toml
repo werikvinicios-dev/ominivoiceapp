@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+# B008: `Form(...)`/`File(...)` em argumentos padrão é o idioma do FastAPI.
+# BLE001: alguns fallbacks precisam mesmo capturar qualquer exceção.
+ignore = ["B008", "BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

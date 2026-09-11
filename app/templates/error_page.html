@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Erro {{ status }} · OmniVoice Studio{% endblock %}
+{% block content %}
+<h1 class="page-title">Erro {{ status }}</h1>
+<div class="alert">{{ message }}</div>
+<a class="btn btn-block" href="/">Voltar para o início</a>
+{% endblock %}

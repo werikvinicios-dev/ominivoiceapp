@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Histórico · OmniVoice Studio{% endblock %}
+
+{% block content %}
+<div class="row" style="margin-bottom:14px">
+  <h1 class="page-title" style="margin:0">Histórico</h1>
+  <span class="spacer"></span>
+  {% if generations %}
+  <form method="post" action="/historico/limpar"
+        onsubmit="return confirm('Apagar todas as gerações e seus áudios?')">
+    <button class="btn btn-sm btn-danger" type="submit">Limpar tudo</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if generations %}
+  <p class="hint" style="margin:-6px 0 14px">
+    {{ total }} geraç{{ 'ões' if total != 1 else 'ão' }} guardada{{ 's' if total != 1 else '' }} neste aparelho.
+  </p>
+  {% for generation in generations %}
+    {% include "partials/generation_card.html" with context %}
+  {% endfor %}
+{% else %}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3a9 9 0 1 0 8.94 10h-2.02A7 7 0 1 1 13 5v4l5-5-5-5v4zM12 8v5l4 2 .75-1.23L13.5 12V8H12z"/></svg>
+    <p class="small">Nada gerado ainda.</p>
+    <a class="btn btn-sm" href="/">Criar o primeiro áudio</a>
+  </div>
+{% endif %}
+{% endblock %}

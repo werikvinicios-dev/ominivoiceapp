@@ -1,0 +1,42 @@
+{% if voices %}
+<div class="card">
+  <h2 class="card-title">{{ voices | length }} vo{{ 'zes' if voices | length != 1 else 'z' }} salva{{ 's' if voices | length != 1 else '' }}</h2>
+
+  {% for voice in voices %}
+  <div class="voice-item {% if voice.id == created_id %}is-new{% endif %}" id="voice-{{ voice.id }}">
+    <div class="avatar">{{ voice.name[0] }}</div>
+    <div style="min-width:0;flex:1">
+      <div class="voice-name">{{ voice.name }}</div>
+      <div class="meta">
+        {% if voice.duration %}<span>{{ voice.duration | duration }}</span>{% endif %}
+        {% if voice.language %}<span>{{ voice.language_name }}</span>{% endif %}
+        <span data-timestamp="{{ voice.created_at }}"></span>
+      </div>
+      {% if voice.ref_text %}
+        <div class="small muted" style="margin-top:4px">“{{ voice.ref_text }}”</div>
+      {% endif %}
+      {% if voice.has_sample %}
+        <audio controls preload="none" src="/vozes/{{ voice.id }}/amostra"></audio>
+      {% endif %}
+      <div class="row" style="margin-top:6px">
+        <a class="btn btn-sm" href="/?voz={{ voice.id }}">Usar</a>
+        <button class="btn btn-sm"
+                type="button"
+                data-rename="{{ voice.id }}"
+                data-current-name="{{ voice.name }}">Renomear</button>
+        <button class="btn btn-sm btn-danger"
+                hx-delete="/vozes/{{ voice.id }}"
+                hx-target="#voice-list"
+                hx-swap="innerHTML"
+                hx-confirm="Excluir a voz “{{ voice.name }}”?">Excluir</button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+  <p class="small">Nenhuma voz salva ainda. Grave ou envie um áudio acima.</p>
+</div>
+{% endif %}

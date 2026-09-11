@@ -1,0 +1,15 @@
+{
+  "name": "OmniVoice Studio",
+  "short_name": "OmniVoice",
+  "description": "Síntese de voz multilíngue com clonagem e criação de vozes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

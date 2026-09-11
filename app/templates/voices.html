@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Vozes · OmniVoice Studio{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Biblioteca de vozes</h1>
+
+<form id="voice-form"
+      class="card"
+      hx-post="/vozes"
+      hx-target="#voice-list"
+      hx-swap="innerHTML"
+      hx-encoding="multipart/form-data"
+      hx-disabled-elt="#voice-submit"
+      hx-on::after-request="if(event.detail.successful){this.reset();window.OmniRecorder.reset();this.dispatchEvent(new CustomEvent('voices-changed',{bubbles:true}))}">
+
+  <h2 class="card-title">Nova voz</h2>
+
+  <label class="field">
+    <span class="label">Nome</span>
+    <input type="text" name="name" required maxlength="80"
+           placeholder="ex.: Minha voz, Narrador">
+  </label>
+
+  <div class="field">
+    <span class="label">Áudio de referência</span>
+
+    <div class="row" id="rec-controls">
+      <button type="button" class="btn btn-rec" id="rec-toggle">
+        <span class="rec-dot" hidden></span>
+        <span id="rec-label">Gravar pelo microfone</span>
+      </button>
+      <span class="rec-timer" id="rec-timer" hidden>0:00</span>
+    </div>
+
+    <p class="hint">Ou envie um arquivo (WAV, MP3, M4A, OGG…).</p>
+    <input type="file" name="audio" id="voice-audio" accept="audio/*" required
+           style="margin-top:8px">
+
+    <audio id="rec-preview" controls hidden></audio>
+    <p class="hint">Ideal: 3 a 10 segundos de fala limpa, sem música nem ruído.</p>
+  </div>
+
+  <label class="field">
+    <span class="label">Transcrição do áudio {% if engine_has_asr %}(opcional){% endif %}</span>
+    <input type="text" name="ref_text" maxlength="1000"
+           placeholder="{% if engine_has_asr %}Deixe vazio para transcrever automaticamente{% else %}Escreva exatamente o que é dito no áudio{% endif %}"
+           {% if not engine_has_asr %}required{% endif %}>
+    {% if not engine_has_asr %}
+      <p class="hint">A transcrição automática está desligada neste servidor.</p>
+    {% endif %}
+  </label>
+
+  <label class="field">
+    <span class="label">Idioma do áudio (opcional)</span>
+    <select name="language">
+      <option value="auto" selected>Não informar</option>
+      <optgroup label="Mais usados">
+        {% for lang in featured_languages %}
+          <option value="{{ lang.code }}">{{ lang.name }}</option>
+        {% endfor %}
+      </optgroup>
+      <optgroup label="Todos os idiomas ({{ all_languages | length }})">
+        {% for lang in all_languages %}
+          <option value="{{ lang.code }}">{{ lang.name }}</option>
+        {% endfor %}
+      </optgroup>
+    </select>
+  </label>
+
+  <button class="btn btn-primary btn-block" id="voice-submit" type="submit">
+    <span class="spin htmx-indicator"></span>
+    <span class="lbl">Salvar voz</span>
+  </button>
+  <p class="hint" style="text-align:center">
+    O áudio é processado no servidor e pode levar alguns segundos.
+  </p>
+</form>
+
+<div id="voice-list"
+     hx-get="/vozes/lista"
+     hx-trigger="voices-changed from:body"
+     hx-target="this"
+     hx-swap="innerHTML">
+  {% include "partials/voice_list.html" %}
+</div>
+{% endblock %}

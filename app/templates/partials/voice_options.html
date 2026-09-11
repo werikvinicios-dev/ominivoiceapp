@@ -1,0 +1,18 @@
+{% if voices %}
+  <label class="field" style="margin-bottom:0">
+    <span class="label">Escolha uma voz salva</span>
+    <select name="voice_id" id="voice-select">
+      {% for voice in voices %}
+        <option value="{{ voice.id }}">
+          {{ voice.name }}{% if voice.duration %} · {{ voice.duration | duration }}{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+{% else %}
+  <div class="empty">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+    <p class="small">Nenhuma voz salva ainda.</p>
+    <a class="btn btn-sm" href="/vozes">Gravar ou enviar uma voz</a>
+  </div>
+{% endif %}

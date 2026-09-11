@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+
+# Dados gerados em tempo de execução (banco, áudios, vozes, uploads).
+# A barra inicial limita ao diretório raiz — app/data/ é versionado.
+/data/

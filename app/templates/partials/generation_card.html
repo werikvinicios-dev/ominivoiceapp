@@ -1,0 +1,67 @@
+{#
+  Cartão de uma geração. Enquanto está na fila ou executando, ele se
+  recarrega sozinho a cada 1,5 s; quando termina, o polling para.
+#}
+<div class="card gen-card is-{{ generation.status }}"
+     id="gen-{{ generation.id }}"
+     {% if generation.status in ('queued', 'running') %}
+       hx-get="/geracoes/{{ generation.id }}/cartao?autoplay={{ 'true' if autoplay else 'false' }}"
+       hx-trigger="every 1.5s"
+       hx-target="this"
+       hx-swap="outerHTML"
+     {% endif %}>
+
+  <div class="row-tight" style="justify-content:space-between">
+    <div class="row-tight">
+      {% if generation.status == 'queued' %}
+        <span class="badge badge-busy">na fila</span>
+      {% elif generation.status == 'running' %}
+        <span class="badge badge-busy">
+          <span class="spin" style="width:10px;height:10px;border-width:2px"></span>
+          gerando
+        </span>
+      {% elif generation.status == 'done' %}
+        <span class="badge badge-ok">pronto</span>
+      {% else %}
+        <span class="badge badge-err">erro</span>
+      {% endif %}
+      <span class="badge">{{ mode_labels.get(generation.mode, generation.mode) }}</span>
+    </div>
+    <button class="btn btn-sm btn-danger"
+            hx-delete="/geracoes/{{ generation.id }}"
+            hx-target="#gen-{{ generation.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Excluir esta geração?"
+            aria-label="Excluir geração">Excluir</button>
+  </div>
+
+  <p class="gen-text">{{ generation.text }}</p>
+
+  {% if generation.status == 'done' %}
+    <audio controls preload="metadata"
+           {% if autoplay %}autoplay{% endif %}
+           src="/geracoes/{{ generation.id }}/audio"></audio>
+    <div class="row" style="margin-top:6px">
+      <a class="btn btn-sm"
+         href="/geracoes/{{ generation.id }}/audio?download=true"
+         download="omnivoice-{{ generation.id }}.wav">Baixar WAV</a>
+      <span class="spacer"></span>
+      <span class="small muted">{{ generation.duration | duration }}</span>
+    </div>
+  {% elif generation.status == 'error' %}
+    <div class="alert small" style="margin:10px 0 0">{{ generation.error }}</div>
+  {% endif %}
+
+  <div class="meta" style="margin-top:10px">
+    <span><b>Idioma:</b> {{ generation.language_name }}</span>
+    {% if generation.voice_name %}<span><b>Voz:</b> {{ generation.voice_name }}</span>{% endif %}
+    {% if generation.instruct %}<span><b>Estilo:</b> {{ generation.instruct }}</span>{% endif %}
+    {% if generation.params.speed and generation.params.speed != 1.0 %}
+      <span><b>Velocidade:</b> {{ '%.2f'|format(generation.params.speed) }}×</span>
+    {% endif %}
+    {% if generation.params.num_step %}
+      <span><b>Passos:</b> {{ generation.params.num_step }}</span>
+    {% endif %}
+    <span data-timestamp="{{ generation.created_at }}"></span>
+  </div>
+</div>
