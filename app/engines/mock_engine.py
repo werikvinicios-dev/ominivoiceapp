@@ -172,5 +172,5 @@ class MockEngine(TTSEngine):
                 samples = samples[:target]
 
         # Simula o custo de inferência para a fila ficar observável na UI.
-        time.sleep(min(2.0, 0.15 + len(samples) / _SAMPLE_RATE * 0.05))
+        time.sleep(min(0.5, 0.05 + len(samples) / _SAMPLE_RATE * 0.02))
         return samples or [0.0] * _SAMPLE_RATE

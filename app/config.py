@@ -75,28 +75,51 @@ class Settings:
         default_factory=lambda: _env_int("OMNI_HISTORY_LIMIT", 200)
     )
 
+    # Pasta persistente (ex.: Google Drive no Colab). Recebe banco, vozes e
+    # áudios finais; o resto continua no runtime, que é bem mais rápido.
+    # Vazio = tudo junto em data_dir.
+    persist_dir_raw: str = field(
+        default_factory=lambda: os.environ.get("OMNI_PERSIST_DIR", "").strip()
+    )
+
+    @property
+    def persist_dir(self) -> Path:
+        return Path(self.persist_dir_raw).resolve() if self.persist_dir_raw else self.data_dir
+
+    @property
+    def is_persistent(self) -> bool:
+        """``True`` quando os dados sobrevivem ao fim da sessão."""
+        return bool(self.persist_dir_raw)
+
     @property
     def audio_dir(self) -> Path:
-        return self.data_dir / "audio"
+        return self.persist_dir / "audio"
 
     @property
     def voices_dir(self) -> Path:
-        return self.data_dir / "voices"
+        return self.persist_dir / "voices"
+
+    @property
+    def db_path(self) -> Path:
+        return self.persist_dir / "studio.db"
 
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "uploads"
 
     @property
-    def db_path(self) -> Path:
-        return self.data_dir / "studio.db"
+    def temp_dir(self) -> Path:
+        """Áudio descartável: prévias e checkpoints de segmentos."""
+        return self.data_dir / "temp"
 
     def ensure_dirs(self) -> None:
         for directory in (
             self.data_dir,
+            self.persist_dir,
             self.audio_dir,
             self.voices_dir,
             self.uploads_dir,
+            self.temp_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

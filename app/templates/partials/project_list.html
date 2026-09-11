@@ -1,0 +1,29 @@
+{% if projects %}
+  {% for project in projects %}
+  <div class="project-item {% if project.id == saved_id %}is-new{% endif %}">
+    <div style="min-width:0;flex:1">
+      <div class="voice-name">{{ project.name }}</div>
+      <div class="meta">
+        <span>{{ project.chars }} caracteres</span>
+        <span data-timestamp="{{ project.updated_at }}"></span>
+      </div>
+      {% if project.preview %}
+        <div class="small muted" style="margin-top:3px">{{ project.preview }}…</div>
+      {% endif %}
+    </div>
+    <div class="row-tight">
+      <button class="btn btn-sm" type="button" data-load-project="{{ project.id }}">Abrir</button>
+      <button class="btn btn-sm btn-danger"
+              hx-delete="/projetos/{{ project.id }}"
+              hx-target="#project-list"
+              hx-swap="innerHTML"
+              hx-confirm="Excluir o projeto “{{ project.name }}”?">Excluir</button>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="hint" style="margin:0">
+    Nenhum texto salvo ainda. Salvar é o que permite retomar o trabalho depois
+    que a sessão do Colab termina.
+  </p>
+{% endif %}

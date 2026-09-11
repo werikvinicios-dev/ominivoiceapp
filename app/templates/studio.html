@@ -28,12 +28,57 @@
   </div>
 
   <div class="card">
-    <label class="field">
-      <span class="label">Texto para falar</span>
+    <div class="field" style="margin-bottom:0">
+      <span class="label">
+        Texto para falar
+        <button class="btn-link" type="button" id="help-toggle"
+                hx-get="/ajuda/tags" hx-target="#markup-help" hx-swap="innerHTML">
+          o que são as tags?
+        </button>
+      </span>
       <textarea name="text" id="gen-text" required
                 maxlength="{{ max_text_chars }}"
-                placeholder="Digite o que você quer ouvir…"></textarea>
-    </label>
+                placeholder="Digite o que você quer ouvir…&#10;&#10;Dica: selecione um trecho e toque numa emoção abaixo."></textarea>
+    </div>
+
+    {# -------- barra de marcação: aplica tags ao trecho selecionado -------- #}
+    <div class="toolbar" role="toolbar" aria-label="Marcações de audiobook">
+      <button class="chip" type="button" id="pause-toggle" aria-expanded="false">
+        ⏸ Pausa
+      </button>
+      {% for style in styles %}
+        <button class="chip {% if not style.real %}is-approx{% endif %}"
+                type="button"
+                data-tag="[{{ style.key }}]"
+                title="{{ style.description }}{% if not style.real %} (aproximação){% endif %}">
+          {{ style.label }}
+        </button>
+      {% endfor %}
+      <button class="chip" type="button" data-tag="[sigh]" title="Som real do modelo">Suspiro</button>
+      <button class="chip" type="button" data-tag="[laughter]" title="Som real do modelo">Riso</button>
+    </div>
+
+    <div class="pause-panel" id="pause-panel" hidden>
+      {% for seconds in ['0.3', '0.5', '0.8', '1.0', '1.5', '2.0'] %}
+        <button class="chip" type="button" data-tag="[pause={{ seconds }}]">
+          {{ seconds.replace('.', ',') }} s
+        </button>
+      {% endfor %}
+      <button class="chip" type="button" data-tag="[long-pause]">
+        Longa ({{ '%.1f'|format(pauses.long_pause) }}s)
+      </button>
+      <button class="chip" type="button" id="pause-custom">Personalizada…</button>
+    </div>
+
+    <div id="markup-status"
+         hx-post="/markup/validar"
+         hx-trigger="markup-changed from:body delay:400ms"
+         hx-target="this"
+         hx-swap="innerHTML"
+         hx-include="#gen-text"></div>
+
+    <div id="markup-help"></div>
+
     <p class="hint" style="text-align:right">
       <span id="char-count">0</span> / {{ max_text_chars }}
     </p>
@@ -88,11 +133,11 @@
         {% if category.hint %}<p class="hint">{{ category.hint }}</p>{% endif %}
       </label>
     {% endfor %}
-    <label class="field" style="margin-bottom:0">
-      <span class="label">Descrição extra (opcional)</span>
-      <input type="text" name="instruct_extra"
-             placeholder="ex.: narrador calmo, tom de documentário">
-    </label>
+    <p class="hint" style="margin-bottom:0">
+      O modelo aceita só estes atributos — descrições livres como “narrador
+      calmo” não têm efeito. Para variar a interpretação, use as tags de
+      emoção no editor de texto.
+    </p>
   </div>
 
   {# ------------------------------------------------------------ avançado #}
@@ -153,11 +198,51 @@
     </div>
   </details>
 
-  <button class="btn btn-primary btn-block" id="gen-submit" type="submit">
-    <span class="spin htmx-indicator"></span>
-    <span class="lbl">Gerar áudio</span>
-  </button>
+  <div class="row" style="gap:10px;flex-wrap:nowrap">
+    <button class="btn" type="button" id="preview-submit"
+            data-limit="{{ preview_max_chars }}"
+            hx-post="/testar-trecho"
+            hx-include="#gen-form"
+            hx-target="#result"
+            hx-swap="innerHTML"
+            hx-disabled-elt="#preview-submit, #gen-submit"
+            title="Gera só o trecho selecionado, sem entrar no histórico">
+      <span class="spin htmx-indicator"></span>
+      <span class="lbl">Testar trecho</span>
+    </button>
+    <button class="btn btn-primary" id="gen-submit" type="submit" style="flex:1">
+      <span class="spin htmx-indicator"></span>
+      <span class="lbl">Gerar áudio</span>
+    </button>
+  </div>
+  <p class="hint" style="text-align:center">
+    “Testar trecho” usa a seleção do editor (ou as primeiras linhas) e não
+    aparece no histórico.
+  </p>
 </form>
 
 <div id="result" style="margin-top:16px"></div>
+
+{# ------------------------------- projetos ------------------------------- #}
+<details class="accordion" id="projects" style="margin-top:16px">
+  <summary>Textos salvos</summary>
+  <div class="accordion-body">
+    <p class="hint" style="margin-top:0">
+      Salve o capítulo para retomá-lo depois — útil no Colab, onde a sessão é
+      temporária.
+    </p>
+    <div class="row" style="margin-bottom:12px">
+      <input type="text" id="project-name" placeholder="Nome do capítulo"
+             maxlength="80" style="flex:1;min-width:140px">
+      <button class="btn btn-sm" type="button" id="project-save">Salvar texto</button>
+    </div>
+    <div id="project-list"
+         hx-get="/projetos"
+         hx-trigger="projects-changed from:body"
+         hx-target="this"
+         hx-swap="innerHTML">
+      {% include "partials/project_list.html" %}
+    </div>
+  </div>
+</details>
 {% endblock %}

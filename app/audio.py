@@ -50,6 +50,55 @@ def write_wav(path: str | Path, samples: Sequence[float], sample_rate: int) -> f
     return frames / float(sample_rate) if sample_rate else 0.0
 
 
+def concat_wavs(
+    items: Sequence[tuple[str, object]],
+    out_path: str | Path,
+    sample_rate: int,
+) -> float:
+    """Monta um WAV a partir de trechos de áudio e silêncios reais.
+
+    ``items`` é uma sequência de ``("audio", caminho)`` ou
+    ``("silence", segundos)``. Os quadros são copiados em blocos, então um
+    audiobook longo não precisa caber na memória.
+
+    O silêncio é gravado aqui, depois da síntese — é por isso que
+    ``[pause=1.2]`` rende exatamente 1,2 s, qualquer que seja o modelo.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    frames = 0
+
+    with contextlib.closing(wave.open(str(out_path), "wb")) as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(int(sample_rate))
+
+        for kind, value in items:
+            if kind == "silence":
+                count = round(float(value) * sample_rate)
+                if count <= 0:
+                    continue
+                out.writeframes(b"\x00\x00" * count)
+                frames += count
+                continue
+
+            with contextlib.closing(wave.open(str(value), "rb")) as source:
+                if source.getframerate() != sample_rate or source.getnchannels() != 1:
+                    raise ValueError(
+                        f"{value}: esperado WAV mono a {sample_rate} Hz."
+                    )
+                remaining = source.getnframes()
+                frames += remaining
+                while remaining > 0:
+                    block = source.readframes(min(remaining, 65536))
+                    if not block:
+                        break
+                    out.writeframes(block)
+                    remaining -= len(block) // 2
+
+    return frames / float(sample_rate) if sample_rate else 0.0
+
+
 def wav_duration(path: str | Path) -> float:
     """Duração em segundos de um WAV, ou 0.0 se não for legível."""
     try:

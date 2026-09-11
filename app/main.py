@@ -24,11 +24,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, languages, presets
+from . import __version__, db, languages, markup, prefs, presets
 from .audio import format_duration, wav_duration
 from .config import BASE_DIR, settings
 from .engines import EngineError, GenerationParams, get_engine
-from .jobs import Job, JobQueue
+from .jobs import Job, JobQueue, job_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     settings.ensure_dirs()
-    db.init_db()
+    pending = db.init_db()
 
     engine = get_engine()
     if settings.preload:
@@ -76,6 +76,10 @@ async def lifespan(app: FastAPI):
 
     job_queue = JobQueue(engine)
     job_queue.start()
+    for row in pending:
+        # Segmentos já sintetizados ficam em disco: a retomada continua daí.
+        logger.info("Retomando geração interrompida %s.", row["id"])
+        job_queue.submit(job_from_row(row))
     app.state.engine = engine
     app.state.queue = job_queue
     if engine.is_mock:
@@ -204,6 +208,10 @@ def _generation_view(row) -> dict[str, Any]:
         "finished_at": row["finished_at"],
         "elapsed": (row["finished_at"] or time.time()) - (row["created_at"] or 0),
         "has_audio": bool(row["audio_path"]),
+        "is_preview": bool(row["is_preview"]),
+        "segments_total": row["segments_total"] or 0,
+        "segments_done": row["segments_done"] or 0,
+        "warnings": json.loads(row["warnings"] or "[]"),
     }
 
 
@@ -218,6 +226,19 @@ def _voice_view(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "has_sample": bool(row["sample_path"]),
     }
+
+
+def _project_view(row, full: bool = False) -> dict[str, Any]:
+    view = {
+        "id": row["id"],
+        "name": row["name"],
+        "chars": len(row["text"]),
+        "updated_at": row["updated_at"],
+        "preview": markup.strip_markup(row["text"])[:90],
+    }
+    if full:
+        view["text"] = row["text"]
+    return view
 
 
 def _mode_labels() -> dict[str, str]:
@@ -241,6 +262,11 @@ def page_studio(request: Request) -> HTMLResponse:
         categories=presets.CATEGORIES,
         defaults=GenerationParams(),
         max_text_chars=settings.max_text_chars,
+        preview_max_chars=PREVIEW_MAX_CHARS,
+        styles=list(markup.STYLES.values()),
+        native_tags=markup.NATIVE_TAGS,
+        pauses=prefs.pauses(),
+        projects=[_project_view(row) for row in db.list_projects()],
     )
 
 
@@ -285,18 +311,107 @@ def page_settings(request: Request) -> HTMLResponse:
             "Transcrição automática": "sim" if engine.supports_asr else "não",
             "Taxa de amostragem": f"{engine.sampling_rate} Hz",
             "Pasta de dados": str(settings.data_dir),
+            "Pasta persistente": (
+                str(settings.persist_dir)
+                if settings.is_persistent
+                else "não configurada (dados temporários)"
+            ),
             "Limite do histórico": f"{settings.history_limit} gerações",
         },
         counts={
             "vozes": len(db.list_voices()),
             "gerações": db.count_generations(),
+            "projetos": len(db.list_projects()),
         },
+        pauses=prefs.pauses(),
+        persistent=settings.is_persistent,
+        persist_dir=str(settings.persist_dir),
     )
 
 
 # ---------------------------------------------------------------------------
 # Geração
 # ---------------------------------------------------------------------------
+
+
+def _resolve_mode(
+    mode: str,
+    voice_id: str,
+    selections: dict[str, str],
+) -> tuple[str | None, str | None, str | None]:
+    """Valida o modo e devolve (voice_id, voice_name, instruct)."""
+    if mode not in MODES:
+        raise HTTPException(400, "Modo de geração inválido.")
+
+    if mode == "clone":
+        if not voice_id:
+            raise HTTPException(400, "Escolha uma voz da biblioteca para clonar.")
+        voice = db.get_voice(voice_id)
+        if voice is None:
+            raise HTTPException(404, "Voz não encontrada.")
+        return voice["id"], voice["name"], None
+
+    if mode == "design":
+        instruct = presets.build_instruct(selections)
+        if not instruct:
+            raise HTTPException(
+                400, "Escolha ao menos um atributo para desenhar a voz."
+            )
+        return None, None, instruct
+
+    return None, None, None
+
+
+def _submit(
+    *,
+    mode: str,
+    text: str,
+    language: str | None,
+    instruct: str | None,
+    voice_id: str | None,
+    voice_name: str | None,
+    params: GenerationParams,
+    is_preview: bool,
+) -> str:
+    """Analisa o markup, registra a geração e coloca na fila."""
+    pauses = prefs.pauses()
+    parsed = markup.parse(
+        text, pause=pauses["pause"], long_pause=pauses["long_pause"]
+    )
+    if not parsed.speech_segments:
+        raise HTTPException(400, "O texto não tem nada para falar.")
+
+    stored = params.to_dict()
+    # As durações vão junto para que uma retomada reproduza o mesmo áudio.
+    stored["pause"] = pauses["pause"]
+    stored["long_pause"] = pauses["long_pause"]
+
+    generation_id = db.create_generation(
+        mode=mode,
+        text=text,
+        language=language,
+        instruct=instruct,
+        voice_id=voice_id,
+        voice_name=voice_name,
+        params=stored,
+        is_preview=is_preview,
+        segments_total=len(parsed.speech_segments),
+        warnings=[w.as_dict() for w in parsed.warnings],
+    )
+    _queue().submit(
+        Job(
+            generation_id=generation_id,
+            text=text,
+            language=language,
+            instruct=instruct,
+            voice_id=voice_id,
+            params=params,
+            pause=pauses["pause"],
+            long_pause=pauses["long_pause"],
+            is_preview=is_preview,
+        )
+    )
+    return generation_id
 
 
 @app.post("/gerar", response_class=HTMLResponse)
@@ -306,7 +421,6 @@ async def create_generation(
     text: str = Form(""),
     language: str = Form(""),
     voice_id: str = Form(""),
-    instruct_extra: str = Form(""),
     gender: str = Form(""),
     age: str = Form(""),
     pitch: str = Form(""),
@@ -322,40 +436,20 @@ async def create_generation(
     postprocess_output: bool = Form(False),
     normalize_text: bool = Form(False),
 ) -> HTMLResponse:
-    if mode not in MODES:
-        raise HTTPException(400, "Modo de geração inválido.")
-
     clean_text = _clean_text(text, "O texto", settings.max_text_chars)
     lang = _parse_language(language)
-
-    voice_name = None
-    resolved_voice_id = None
-    if mode == "clone":
-        if not voice_id:
-            raise HTTPException(400, "Escolha uma voz da biblioteca para clonar.")
-        voice = db.get_voice(voice_id)
-        if voice is None:
-            raise HTTPException(404, "Voz não encontrada.")
-        resolved_voice_id = voice["id"]
-        voice_name = voice["name"]
-
-    instruct = None
-    if mode == "design":
-        instruct = presets.build_instruct(
-            {
-                "gender": gender,
-                "age": age,
-                "pitch": pitch,
-                "style": style,
-                "accent": accent,
-                "dialect": dialect,
-            },
-            instruct_extra,
-        )
-        if not instruct:
-            raise HTTPException(
-                400, "Escolha ao menos um atributo para desenhar a voz."
-            )
+    resolved_voice_id, voice_name, instruct = _resolve_mode(
+        mode,
+        voice_id,
+        {
+            "gender": gender,
+            "age": age,
+            "pitch": pitch,
+            "style": style,
+            "accent": accent,
+            "dialect": dialect,
+        },
+    )
 
     params = GenerationParams(
         num_step=num_step,
@@ -368,24 +462,15 @@ async def create_generation(
         normalize_text=normalize_text,
     ).clamped()
 
-    generation_id = db.create_generation(
+    generation_id = _submit(
         mode=mode,
         text=clean_text,
         language=lang,
         instruct=instruct,
         voice_id=resolved_voice_id,
         voice_name=voice_name,
-        params=params.to_dict(),
-    )
-    _queue().submit(
-        Job(
-            generation_id=generation_id,
-            text=clean_text,
-            language=lang,
-            instruct=instruct,
-            voice_id=resolved_voice_id,
-            params=params,
-        )
+        params=params,
+        is_preview=False,
     )
 
     return render(
@@ -571,6 +656,184 @@ def remove_voice(request: Request, voice_id: str) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
+# Markup de audiobook
+# ---------------------------------------------------------------------------
+
+#: Limite do trecho enviado em "Testar trecho": prévia tem que ser rápida.
+PREVIEW_MAX_CHARS = 600
+
+
+@app.post("/markup/validar", response_class=HTMLResponse)
+def validate_markup(request: Request, text: str = Form("")) -> HTMLResponse:
+    """Analisa o texto sem gerar nada, para o aviso ao vivo no editor."""
+    pauses = prefs.pauses()
+    parsed = markup.parse(
+        text or "", pause=pauses["pause"], long_pause=pauses["long_pause"]
+    )
+    speech = parsed.speech_segments
+    return render(
+        request,
+        "partials/markup_status.html",
+        warnings=[w.as_dict() for w in parsed.warnings],
+        segments=len(speech),
+        pause_total=round(parsed.total_pause, 2),
+        styles=sorted({s.style for s in speech if s.style}),
+        has_markup=markup.has_markup(text or ""),
+    )
+
+
+@app.post("/testar-trecho", response_class=HTMLResponse)
+async def preview_excerpt(
+    request: Request,
+    mode: str = Form("auto"),
+    text: str = Form(""),
+    language: str = Form(""),
+    voice_id: str = Form(""),
+    gender: str = Form(""),
+    age: str = Form(""),
+    pitch: str = Form(""),
+    style: str = Form(""),
+    accent: str = Form(""),
+    dialect: str = Form(""),
+    num_step: int = Form(32),
+    guidance_scale: str = Form("2.0"),
+    speed: str = Form("1.0"),
+    denoise: bool = Form(False),
+    preprocess_prompt: bool = Form(False),
+    postprocess_output: bool = Form(False),
+    normalize_text: bool = Form(False),
+) -> HTMLResponse:
+    """Gera só o trecho selecionado, fora do histórico.
+
+    Serve para acertar voz, emoção e ritmo antes de mandar o capítulo todo.
+    """
+    clean_text = _clean_text(text, "O trecho", PREVIEW_MAX_CHARS)
+    lang = _parse_language(language)
+    resolved_voice_id, voice_name, instruct = _resolve_mode(
+        mode,
+        voice_id,
+        {
+            "gender": gender,
+            "age": age,
+            "pitch": pitch,
+            "style": style,
+            "accent": accent,
+            "dialect": dialect,
+        },
+    )
+
+    params = GenerationParams(
+        num_step=num_step,
+        guidance_scale=_parse_float(guidance_scale, 2.0) or 2.0,
+        speed=_parse_float(speed, 1.0) or 1.0,
+        duration=None,
+        denoise=denoise,
+        preprocess_prompt=preprocess_prompt,
+        postprocess_output=postprocess_output,
+        normalize_text=normalize_text,
+    ).clamped()
+
+    generation_id = _submit(
+        mode=mode,
+        text=clean_text,
+        language=lang,
+        instruct=instruct,
+        voice_id=resolved_voice_id,
+        voice_name=voice_name,
+        params=params,
+        is_preview=True,
+    )
+    return render(
+        request,
+        "partials/generation_card.html",
+        generation=_generation_view(db.get_generation(generation_id)),
+        mode_labels=_mode_labels(),
+        autoplay=True,
+    )
+
+
+@app.get("/ajuda/tags", response_class=HTMLResponse)
+def markup_help(request: Request) -> HTMLResponse:
+    return render(
+        request,
+        "partials/markup_help.html",
+        catalog=markup.tag_catalog(),
+        pauses=prefs.pauses(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Projetos (textos salvos)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/projetos", response_class=HTMLResponse)
+def project_list(request: Request) -> HTMLResponse:
+    return render(
+        request,
+        "partials/project_list.html",
+        projects=[_project_view(row) for row in db.list_projects()],
+    )
+
+
+@app.post("/projetos", response_class=HTMLResponse)
+def project_save(
+    request: Request,
+    name: str = Form(""),
+    text: str = Form(""),
+    project_id: str = Form(""),
+) -> HTMLResponse:
+    clean_name = _clean_text(name, "O nome do projeto", 80)
+    clean_text = _clean_text(text, "O texto", settings.max_text_chars)
+    if project_id and db.get_project(project_id) is not None:
+        db.update_project(project_id, clean_name, clean_text)
+        saved_id = project_id
+    else:
+        saved_id = db.create_project(clean_name, clean_text)
+    return render(
+        request,
+        "partials/project_list.html",
+        projects=[_project_view(row) for row in db.list_projects()],
+        saved_id=saved_id,
+    )
+
+
+@app.get("/projetos/{project_id}")
+def project_get(project_id: str) -> JSONResponse:
+    project = db.get_project(project_id)
+    if project is None:
+        raise HTTPException(404, "Projeto não encontrado.")
+    return JSONResponse(_project_view(project, full=True))
+
+
+@app.delete("/projetos/{project_id}", response_class=HTMLResponse)
+def project_delete(request: Request, project_id: str) -> HTMLResponse:
+    db.delete_project(project_id)
+    return render(
+        request,
+        "partials/project_list.html",
+        projects=[_project_view(row) for row in db.list_projects()],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Preferências
+# ---------------------------------------------------------------------------
+
+
+@app.post("/ajustes/pausas", response_class=HTMLResponse)
+def save_pauses(
+    request: Request, pause: str = Form(""), long_pause: str = Form("")
+) -> HTMLResponse:
+    current = prefs.pauses()
+    updated = prefs.set_pauses(
+        _parse_float(pause, current["pause"]) or current["pause"],
+        _parse_float(long_pause, current["long_pause"]) or current["long_pause"],
+    )
+    return render(request, "partials/pause_form.html", pauses=updated, saved=True)
+
+
+# ---------------------------------------------------------------------------
 # API JSON (para automações)
 # ---------------------------------------------------------------------------
 
@@ -584,8 +847,16 @@ def api_status(request: Request) -> JSONResponse:
             "queue": {"pending": _queue().pending, "current": _queue().current},
             "voices": len(db.list_voices()),
             "generations": db.count_generations(),
+            "persistent": settings.is_persistent,
+            "pauses": prefs.pauses(),
         }
     )
+
+
+@app.get("/api/tags")
+def api_tags() -> JSONResponse:
+    """Catálogo de tags: quais são reais no backend e quais são aproximações."""
+    return JSONResponse(markup.tag_catalog())
 
 
 @app.get("/api/geracoes/{generation_id}")

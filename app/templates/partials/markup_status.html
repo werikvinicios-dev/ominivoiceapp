@@ -1,0 +1,15 @@
+{# Resumo ao vivo do markup: contagem, estilos e problemas encontrados. #}
+{% if warnings %}
+  {% for warning in warnings %}
+    <div class="alert {% if warning.level == 'warning' %}alert-info{% endif %} small"
+         style="margin:8px 0 0">{{ warning.message }}</div>
+  {% endfor %}
+{% endif %}
+
+{% if has_markup or segments > 1 %}
+<div class="meta" style="margin-top:8px">
+  <span><b>{{ segments }}</b> segmento{{ 's' if segments != 1 else '' }}</span>
+  {% if pause_total %}<span><b>{{ '%.1f'|format(pause_total) }}s</b> de pausa</span>{% endif %}
+  {% for style in styles %}<span class="badge">{{ style }}</span>{% endfor %}
+</div>
+{% endif %}

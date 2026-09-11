@@ -109,6 +109,71 @@
     }
   }
 
+
+  // ------------------------------------------------ editor de audiobook
+
+  var Editor = {
+    textarea: function () {
+      return document.getElementById("gen-text");
+    },
+
+    /* Aplica a tag ao trecho selecionado — ou insere no cursor quando não há
+       seleção. Uma tag de emoção vale do ponto onde entra até a próxima tag
+       ou pausa, então colocá-la antes do trecho é o bastante. */
+    applyTag: function (tag) {
+      var field = this.textarea();
+      if (!field) return;
+
+      var start = field.selectionStart || 0;
+      var end = field.selectionEnd || 0;
+      var value = field.value;
+      var isPause = /^\[(pause|long-pause)/.test(tag);
+      var caret;
+
+      if (!isPause && end > start) {
+        // Emoção com seleção: marca o começo do trecho escolhido.
+        var prefix = value.slice(0, start).replace(/[ \t]+$/, "");
+        if (prefix && !/\n$/.test(prefix)) prefix += " ";
+        var body = value.slice(start, end).trim();
+        field.value = prefix + tag + " " + body + value.slice(end);
+        caret = (prefix + tag + " " + body).length;
+      } else {
+        // Sem seleção (ou pausa): entra no cursor, em linha própria.
+        var before = value.slice(0, end).replace(/[ \t]+$/, "");
+        var after = value.slice(end);
+        var separator = isPause ? "\n" : " ";
+        var lead = before && !/\n$/.test(before) ? separator : "";
+        var trail = after && !/^\s/.test(after) ? separator : "";
+        field.value = before + lead + tag + trail + after;
+        caret = (before + lead + tag).length;
+      }
+
+      field.focus();
+      field.setSelectionRange(caret, caret);
+      this.changed();
+    },
+
+    changed: function () {
+      syncCharCount();
+      document.body.dispatchEvent(new CustomEvent("markup-changed", { bubbles: true }));
+    },
+
+    /* Trecho para "Testar trecho": a seleção, ou o começo do texto. */
+    excerpt: function (limit) {
+      var field = this.textarea();
+      if (!field) return "";
+      var selected = field.value.slice(field.selectionStart, field.selectionEnd).trim();
+      var text = selected || field.value.trim();
+      if (text.length <= limit) return text;
+      // Corta num limite de frase para a prévia não terminar no meio.
+      var cut = text.slice(0, limit);
+      var stop = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("\n"), cut.lastIndexOf("!"));
+      return (stop > limit * 0.4 ? cut.slice(0, stop + 1) : cut).trim();
+    },
+  };
+
+  window.OmniEditor = Editor;
+
   // ------------------------------------------------------------- gravação
 
   var Recorder = {
@@ -234,12 +299,63 @@
 
   window.OmniRecorder = Recorder;
 
+
+  function togglePausePanel(force) {
+    var panel = document.getElementById("pause-panel");
+    var button = document.getElementById("pause-toggle");
+    if (!panel || !button) return;
+    var open = force === undefined ? panel.hidden : force;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    button.classList.toggle("is-active", open);
+  }
+
+  function saveProject() {
+    var field = document.getElementById("gen-text");
+    var nameInput = document.getElementById("project-name");
+    if (!field || !field.value.trim()) {
+      alert("Escreva algum texto antes de salvar.");
+      return;
+    }
+    var name = (nameInput && nameInput.value.trim()) || "";
+    if (!name) {
+      name = prompt("Nome do capítulo:", "Capítulo 1") || "";
+      if (!name.trim()) return;
+    }
+    htmx
+      .ajax("POST", "/projetos", {
+        target: "#project-list",
+        swap: "innerHTML",
+        values: { name: name.trim(), text: field.value },
+      })
+      .then(function () {
+        if (nameInput) nameInput.value = "";
+      });
+  }
+
+  async function openProject(id) {
+    var response = await fetch("/projetos/" + id);
+    if (!response.ok) return;
+    var project = await response.json();
+    var field = document.getElementById("gen-text");
+    if (!field) return;
+    if (field.value.trim() && !confirm("Substituir o texto atual por “" + project.name + "”?")) {
+      return;
+    }
+    field.value = project.text;
+    var nameInput = document.getElementById("project-name");
+    if (nameInput) nameInput.value = project.name;
+    Editor.changed();
+    field.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   // ------------------------------------------------------------- ligações
 
   function wire() {
     syncModePanels();
     syncCharCount();
     syncTimestamps();
+    if (document.getElementById("markup-status")) Editor.changed();
 
     var recordButton = document.getElementById("rec-toggle");
     if (recordButton && !Recorder.supported()) {
@@ -278,7 +394,24 @@
   });
 
   document.addEventListener("input", function (event) {
-    if (event.target.id === "gen-text") syncCharCount();
+    if (event.target.id === "gen-text") Editor.changed();
+  });
+
+  /* "Testar trecho" reaproveita o formulário inteiro (voz, idioma, ajustes)
+     mas troca o texto pelo recorte selecionado. */
+  document.body.addEventListener("htmx:configRequest", function (event) {
+    if (event.detail.path !== "/testar-trecho") return;
+    var limit = parseInt(
+      document.getElementById("preview-submit").dataset.limit || "600",
+      10
+    );
+    var excerpt = Editor.excerpt(limit);
+    if (!excerpt) {
+      event.preventDefault();
+      alert("Escreva ou selecione um trecho para testar.");
+      return;
+    }
+    event.detail.parameters.text = excerpt;
   });
 
   document.addEventListener("click", function (event) {
@@ -286,6 +419,51 @@
     if (recordButton) {
       event.preventDefault();
       Recorder.toggle();
+      return;
+    }
+
+    var chip = event.target.closest("[data-tag]");
+    if (chip) {
+      event.preventDefault();
+      Editor.applyTag(chip.dataset.tag);
+      var panel = document.getElementById("pause-panel");
+      if (panel && panel.contains(chip)) togglePausePanel(false);
+      return;
+    }
+
+    if (event.target.closest("#pause-toggle")) {
+      event.preventDefault();
+      togglePausePanel();
+      return;
+    }
+
+    if (event.target.closest("#pause-custom")) {
+      event.preventDefault();
+      var answer = prompt("Pausa em segundos (ex.: 3.5):", "3");
+      var seconds = parseFloat((answer || "").replace(",", "."));
+      if (!isNaN(seconds) && seconds > 0) {
+        Editor.applyTag("[pause=" + seconds + "]");
+        togglePausePanel(false);
+      }
+      return;
+    }
+
+    if (event.target.closest("[data-close-help]")) {
+      event.preventDefault();
+      document.getElementById("markup-help").innerHTML = "";
+      return;
+    }
+
+    if (event.target.closest("#project-save")) {
+      event.preventDefault();
+      saveProject();
+      return;
+    }
+
+    var loadProject = event.target.closest("[data-load-project]");
+    if (loadProject) {
+      event.preventDefault();
+      openProject(loadProject.dataset.loadProject);
       return;
     }
 

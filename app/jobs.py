@@ -10,12 +10,12 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import db
-from .audio import write_wav
+from . import db, markup, pipeline
 from .config import settings
 from .engines import EngineError, GenerationParams, TTSEngine, VoicePrompt
 
@@ -30,6 +30,11 @@ class Job:
     instruct: str | None
     voice_id: str | None
     params: GenerationParams
+    #: Durações de ``[pause]`` e ``[long-pause]`` no momento do envio.
+    pause: float = markup.DEFAULT_PAUSE
+    long_pause: float = markup.DEFAULT_LONG_PAUSE
+    #: Prévias ficam fora do histórico e do diretório persistente.
+    is_preview: bool = False
 
 
 class JobQueue:
@@ -117,17 +122,39 @@ class JobQueue:
     def _process(self, job: Job) -> None:
         db.mark_running(job.generation_id)
         voice = self._resolve_voice(job.voice_id)
-        waveform = self.engine.synthesize(
-            text=job.text,
+
+        parsed = markup.parse(
+            job.text, pause=job.pause, long_pause=job.long_pause
+        )
+        if not parsed.speech_segments:
+            raise EngineError("O texto não tem nada para falar.")
+
+        # Prévias nunca tocam a pasta persistente (o Drive, no Colab).
+        base_dir = settings.temp_dir if job.is_preview else settings.audio_dir
+        output = base_dir / f"{job.generation_id}.wav"
+        work_dir = settings.temp_dir / f"{job.generation_id}.segments"
+
+        def report(done: int, total: int) -> None:
+            db.update_progress(job.generation_id, done, total)
+
+        duration = pipeline.render(
+            self.engine,
+            parsed,
+            out_path=output,
+            work_dir=work_dir,
             language=job.language,
             voice=voice,
             instruct=job.instruct,
             params=job.params,
+            progress=report,
         )
-        output = settings.audio_dir / f"{job.generation_id}.wav"
-        duration = write_wav(output, waveform, self.engine.sampling_rate)
+
         db.mark_done(job.generation_id, str(output), duration)
-        db.prune_history(settings.history_limit)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        if job.is_preview:
+            db.prune_previews()
+        else:
+            db.prune_history(settings.history_limit)
 
     def _run(self) -> None:
         logger.info("Worker de síntese iniciado (motor: %s).", self.engine.name)
@@ -153,12 +180,20 @@ class JobQueue:
 
 
 def job_from_row(row) -> Job:
-    """Reconstrói um Job a partir da linha de ``generations``."""
+    """Reconstrói um Job a partir da linha de ``generations``.
+
+    Usado na retomada: as durações de pausa são lidas dos parâmetros salvos,
+    para que o áudio saia igual ao que a geração original produziria.
+    """
+    stored = json.loads(row["params"] or "{}")
     return Job(
         generation_id=row["id"],
         text=row["text"],
         language=row["language"],
         instruct=row["instruct"],
         voice_id=row["voice_id"],
-        params=GenerationParams.from_dict(json.loads(row["params"] or "{}")),
+        params=GenerationParams.from_dict(stored),
+        pause=float(stored.get("pause", markup.DEFAULT_PAUSE)),
+        long_pause=float(stored.get("long_pause", markup.DEFAULT_LONG_PAUSE)),
+        is_preview=bool(row["is_preview"]),
     )

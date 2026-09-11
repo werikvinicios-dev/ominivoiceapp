@@ -99,14 +99,17 @@ _VALID = {
 }
 
 
-def build_instruct(selections: dict[str, str], extra: str | None = None) -> str | None:
-    """Monta o texto de instrução a partir das escolhas do formulário."""
+def build_instruct(selections: dict[str, str]) -> str | None:
+    """Monta o instruct a partir das escolhas do formulário.
+
+    Só passam valores da whitelist: o ``instruct`` do OmniVoice é uma lista
+    fechada de atributos e ele levanta ``ValueError`` diante de qualquer termo
+    fora dela — descrições livres não funcionariam.
+    """
     parts = [
         value
         for category in CATEGORIES
         if (value := (selections.get(category.key) or "").strip())
         and value in _VALID[category.key]
     ]
-    if extra and extra.strip():
-        parts.append(extra.strip())
     return ", ".join(parts) if parts else None

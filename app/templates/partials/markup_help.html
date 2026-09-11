@@ -1,0 +1,50 @@
+{# Ajuda das tags: o que é real no modelo e o que é aproximação. #}
+<div class="card" style="margin-top:12px">
+  <h3 class="card-title">
+    Tags do editor
+    <button class="btn btn-sm" type="button" data-close-help>Fechar</button>
+  </h3>
+
+  <p class="small muted">
+    Escreva a tag antes do trecho que ela deve afetar. Uma tag de emoção vale
+    só até a próxima tag ou pausa — não contamina o resto do capítulo.
+  </p>
+
+  <h4 class="help-heading">Pausas <span class="badge badge-ok">exatas</span></h4>
+  <p class="small muted">
+    O silêncio é inserido no áudio depois da síntese, então a duração é exata.
+  </p>
+  <ul class="tag-list">
+    <li><code>[pause]</code> — {{ '%.1f'|format(pauses.pause) }}s (ajustável em Ajustes)</li>
+    <li><code>[pause=1.2]</code> — exatamente 1,2 s</li>
+    <li><code>[long-pause]</code> — {{ '%.1f'|format(pauses.long_pause) }}s (ajustável em Ajustes)</li>
+  </ul>
+
+  <h4 class="help-heading">Sons não-verbais <span class="badge badge-ok">nativas</span></h4>
+  <p class="small muted">O modelo produz esses sons de verdade.</p>
+  <ul class="tag-list">
+    {% for item in catalog.native %}<li><code>{{ item.tag }}</code></li>{% endfor %}
+  </ul>
+
+  <h4 class="help-heading">Interpretação</h4>
+  <p class="small muted">
+    O OmniVoice controla o sussurro de verdade. As outras emoções não existem
+    no modelo: o Studio as aproxima mudando ritmo e intensidade, então trate-as
+    como experimentais e confie no ouvido.
+  </p>
+  <ul class="tag-list">
+    {% for item in catalog.style %}
+      <li>
+        <code>{{ item.tag }}</code> — {{ item.label }}
+        {% if item.real %}<span class="badge badge-ok">real</span>
+        {% else %}<span class="badge badge-warn">aprox.</span>{% endif %}
+        <span class="small muted">{{ item.description }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <p class="hint">
+    Uma tag desconhecida nunca é falada: o editor avisa e a ignora na geração,
+    mas o seu texto continua intacto.
+  </p>
+</div>

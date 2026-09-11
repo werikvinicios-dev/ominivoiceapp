@@ -10,3 +10,6 @@ venv/
 # Dados gerados em tempo de execução (banco, áudios, vozes, uploads).
 # A barra inicial limita ao diretório raiz — app/data/ é versionado.
 /data/
+
+# Log do servidor gerado pelo lançador do Colab.
+omnivoice-studio.log

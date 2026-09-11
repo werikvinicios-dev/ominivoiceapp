@@ -25,6 +25,25 @@
 </div>
 
 <div class="card">
+  <h2 class="card-title">Pausas do audiobook</h2>
+  <p class="small muted">
+    Valores usados por <code>[pause]</code> e <code>[long-pause]</code> quando
+    você não especifica a duração. <code>[pause=X]</code> sempre vale X segundos.
+  </p>
+  {% include "partials/pause_form.html" %}
+</div>
+
+{% if not persistent %}
+<div class="card">
+  <h2 class="card-title">Dados desta sessão</h2>
+  <div class="alert alert-info small" style="margin-bottom:0">
+    Nada está sendo salvo fora desta máquina. No Colab, monte o Google Drive
+    pelo notebook para que vozes, textos e áudios sobrevivam ao fim da sessão.
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
   <h2 class="card-title">Usar o modelo de verdade</h2>
   <p class="small muted">
     O OmniVoice roda no computador que serve este site — não no celular. Instale

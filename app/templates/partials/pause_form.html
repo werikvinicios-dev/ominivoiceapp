@@ -1,0 +1,24 @@
+<form hx-post="/ajustes/pausas" hx-target="this" hx-swap="outerHTML">
+  <label class="field">
+    <span class="label">Duração de <code>[pause]</code></span>
+    <div class="slider-row">
+      <input type="range" name="pause" min="0.1" max="5" step="0.1"
+             value="{{ pauses.pause }}"
+             oninput="this.nextElementSibling.value = (+this.value).toFixed(1) + 's'">
+      <output>{{ '%.1f'|format(pauses.pause) }}s</output>
+    </div>
+  </label>
+  <label class="field">
+    <span class="label">Duração de <code>[long-pause]</code></span>
+    <div class="slider-row">
+      <input type="range" name="long_pause" min="0.2" max="8" step="0.1"
+             value="{{ pauses.long_pause }}"
+             oninput="this.nextElementSibling.value = (+this.value).toFixed(1) + 's'">
+      <output>{{ '%.1f'|format(pauses.long_pause) }}s</output>
+    </div>
+  </label>
+  <div class="row">
+    <button class="btn btn-sm btn-primary" type="submit">Salvar pausas</button>
+    {% if saved %}<span class="badge badge-ok">salvo</span>{% endif %}
+  </div>
+</form>
