@@ -250,3 +250,77 @@ def test_tunnel_alive_detects_a_dead_process():
     assert colab.tunnel_alive(
         {"tunnel": DeadProcess.__new__(DeadProcess), "url": "https://colab.internal"}
     ) is not None
+
+
+def _colab():
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import colab
+
+    return colab
+
+
+def test_launcher_never_reuses_a_busy_port():
+    """No Colab a 8080 já está ocupada; insistir nela matava o servidor."""
+    import http.server
+    import threading
+
+    colab = _colab()
+
+    class Intruder(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Intruder)
+    busy = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert colab._port_is_free(busy) is False
+        assert colab.pick_port(busy) != busy
+        # E a porta escolhida está mesmo livre.
+        assert colab._port_is_free(colab.pick_port(busy))
+    finally:
+        server.shutdown()
+
+
+def test_launcher_rejects_a_stranger_on_the_port():
+    """Outro serviço na porta não pode ser confundido com o Studio."""
+    import http.server
+    import threading
+
+    colab = _colab()
+
+    class Stranger(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"algo": "outro servico"}')
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Stranger)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert colab._studio_responds(port) is False
+        # E a espera desiste em vez de anunciar um endereço enganoso.
+        assert colab._wait_for_port(port, timeout=2.0) is False
+    finally:
+        server.shutdown()
+
+
+def test_wait_for_port_gives_up_when_the_process_dies():
+    colab = _colab()
+
+    class DeadProcess:
+        def poll(self):
+            return 3
+
+    assert colab._wait_for_port(1, DeadProcess(), timeout=30.0) is False

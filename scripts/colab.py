@@ -28,6 +28,13 @@ CLOUDFLARED_URL = (
 )
 
 
+def _tail(path: Path, lines: int = 12) -> str:
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
+    except Exception as error:
+        return f"(não consegui ler {path}: {error})"
+
+
 def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(command, check=True, **kwargs)
 
@@ -197,14 +204,64 @@ def setup(use_drive: bool = True, branch: str = "") -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_port(port: int, timeout: float = 900.0) -> bool:
-    """Espera o servidor subir (o modelo pode demorar a carregar)."""
+#: Portas tentadas em ordem. A 8080 está ocupada no Colab por um serviço
+#: interno, então não entra na lista — foi o que fazia o uvicorn morrer com
+#: "address already in use" e o túnel apontar para o servidor errado.
+_PORT_CANDIDATES = (8501, 8600, 8700, 8850, 9100)
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("0.0.0.0", port))
+            return True
+        except OSError:
+            return False
+
+
+def pick_port(preferred: int | None = None) -> int:
+    """Devolve uma porta livre — nunca uma que já esteja em uso."""
+    if preferred and _port_is_free(preferred):
+        return preferred
+    for candidate in _PORT_CANDIDATES:
+        if _port_is_free(candidate):
+            return candidate
+    # Nada da lista livre: deixa o sistema escolher.
+    with socket.socket() as probe:
+        probe.bind(("0.0.0.0", 0))
+        return probe.getsockname()[1]
+
+
+def _studio_responds(port: int) -> bool:
+    """``True`` se quem atende nessa porta é mesmo o OmniVoice Studio.
+
+    Sem esta checagem, um serviço alheio na porta faria o lançador anunciar um
+    endereço que nunca abriria o Studio.
+    """
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/status", timeout=10
+        ) as response:
+            import json
+
+            return "engine" in json.load(response)
+    except Exception:
+        return False
+
+
+def _wait_for_port(port: int, process=None, timeout: float = 900.0) -> bool:
+    """Espera o Studio responder na porta (o modelo demora a carregar).
+
+    Desiste assim que o processo morre: esperar o tempo todo por um servidor
+    que já caiu só atrasa a mensagem de erro.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        with socket.socket() as probe:
-            probe.settimeout(1.0)
-            if probe.connect_ex(("127.0.0.1", port)) == 0:
-                return True
+        if process is not None and process.poll() is not None:
+            return False
+        if _studio_responds(port):
+            return True
         time.sleep(1.0)
     return False
 
@@ -310,13 +367,18 @@ def _open_tunnel(port: int) -> tuple[str | None, object]:
 
 def launch(
     config: dict,
-    port: int = 8080,
+    port: int | None = None,
     preload: bool = True,
 ) -> dict:
     """Sobe o Studio e devolve os endereços de acesso.
 
+    ``port`` vazio escolhe uma porta livre — o Colab já usa a 8080, e insistir
+    nela derrubava o servidor logo depois de carregar o modelo.
+
     O HTTPS importa: sem ele o navegador do celular bloqueia o microfone.
     """
+    port = pick_port(port)
+    _log(f"Porta escolhida: {port}")
     repo = Path(config.get("repo") or REPO_DIR)
     env = os.environ.copy()
     env["OMNI_BACKEND"] = config.get("backend", "auto")
@@ -339,9 +401,15 @@ def launch(
         stderr=subprocess.STDOUT,
     )
 
-    if not _wait_for_port(port):
-        _log(f"O servidor não respondeu. Veja o log em {log_path}.")
-        server.terminate()
+    if not _wait_for_port(port, server):
+        _log("\n" + "=" * 60)
+        _log("  O SERVIDOR NÃO SUBIU")
+        _log("=" * 60)
+        _log(_tail(log_path, 20))
+        _log("=" * 60)
+        _log(f"\n  Log completo:  !tail -60 {log_path}\n")
+        if server.poll() is None:
+            server.terminate()
         return {"server": server, "url": None, "proxy": None,
                 "port": port, "log": str(log_path)}
 
@@ -455,13 +523,6 @@ def keep_alive(session: dict, port: int = 8080, check_every: float = 30.0) -> No
 # ---------------------------------------------------------------------------
 # Diagnóstico
 # ---------------------------------------------------------------------------
-
-
-def _tail(path: Path, lines: int = 12) -> str:
-    try:
-        return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
-    except Exception as error:
-        return f"(não consegui ler {path}: {error})"
 
 
 def diagnose(session: dict | None = None) -> None:
