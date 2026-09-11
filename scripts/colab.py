@@ -17,6 +17,10 @@ import time
 import urllib.request
 from pathlib import Path
 
+#: Incrementado a cada mudança no lançador. Aparece no diagnóstico para
+#: distinguir "a correção não funcionou" de "a correção não chegou".
+LAUNCHER_VERSION = 2
+
 REPO_URL = "https://github.com/werikvinicios-dev/ominivoiceapp.git"
 REPO_DIR = Path("/content/ominivoiceapp")
 DRIVE_MOUNT = Path("/content/drive")
@@ -378,7 +382,7 @@ def launch(
     O HTTPS importa: sem ele o navegador do celular bloqueia o microfone.
     """
     port = pick_port(port)
-    _log(f"Porta escolhida: {port}")
+    _log(f"Lançador v{LAUNCHER_VERSION} — porta escolhida: {port}")
     repo = Path(config.get("repo") or REPO_DIR)
     env = os.environ.copy()
     env["OMNI_BACKEND"] = config.get("backend", "auto")
@@ -535,8 +539,10 @@ def diagnose(session: dict | None = None) -> None:
     port = session.get("port", 8080)
 
     print("=" * 60)
-    print("  DIAGNÓSTICO DO OMNIVOICE STUDIO")
+    print(f"  DIAGNÓSTICO DO OMNIVOICE STUDIO (lançador v{LAUNCHER_VERSION})")
     print("=" * 60)
+    if LAUNCHER_VERSION < 2:
+        print("\n  ATENÇÃO: lançador desatualizado — reinicie o ambiente.")
 
     server = session.get("server")
     if server is None:
