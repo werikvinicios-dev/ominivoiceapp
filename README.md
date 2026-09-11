@@ -35,7 +35,13 @@ Sem login: os dados ficam na máquina que roda o servidor (ou no seu Drive).
 2. **Ambiente de execução → Alterar o tipo de ambiente → GPU (T4)**
 3. **Ambiente de execução → Executar tudo**
 4. Autorize o Google Drive quando ele pedir
-5. Espere o link `https://....trycloudflare.com` e abra no celular
+5. A última célula imprime **dois** endereços — use qualquer um:
+   - **link público** (`trycloudflare.com`): funciona em qualquer aparelho
+   - **link do Colab** (`googleusercontent.com`): só no navegador que está com
+     o notebook aberto, mas não depende de serviço externo e não cai
+
+> Os endereços **mudam a cada execução**. Um link guardado de uma sessão
+> anterior sempre responde erro 1033 — pegue o link atual na saída da célula.
 
 A última célula precisa continuar rodando enquanto você usa o Studio. Sem GPU
 o notebook avisa e abre em modo simulador.
@@ -237,8 +243,9 @@ silêncio digital real), a montagem do WAV, a retomada e a persistência.
 - **A sessão do Colab é temporária.** Sem o Drive montado, tudo se perde ao
   fim da sessão.
 - **O túnel gratuito do trycloudflare cai de vez em quando** (erro 1033 na
-  página). A célula do notebook detecta a queda em até 30 s, reabre o túnel e
-  imprime o novo endereço.
+  página). A célula detecta a queda em até 30 s, reabre o túnel e imprime o
+  novo endereço; o link do Colab continua valendo enquanto isso. A célula de
+  diagnóstico (`colab.diagnose(sessao)`) mostra qual peça falhou.
 
 ## Licença
 

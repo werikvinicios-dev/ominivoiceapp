@@ -268,9 +268,11 @@ def _start_cloudflared(port: int, protocol: str | None, timeout: float = 60.0):
 
 
 def _colab_proxy_url(port: int) -> str | None:
-    """Endereço HTTPS do próprio Colab, usado quando o túnel não sobe.
+    """Endereço HTTPS servido pelo próprio Colab.
 
-    Funciona apenas no navegador que está com o notebook aberto.
+    Não depende de nenhum serviço externo, mas só funciona no mesmo navegador
+    que está com o notebook aberto — no celular, isso significa abrir o Colab
+    pelo navegador (não pelo aplicativo).
     """
     try:
         from google.colab.output import eval_js
@@ -340,38 +342,52 @@ def launch(
     if not _wait_for_port(port):
         _log(f"O servidor não respondeu. Veja o log em {log_path}.")
         server.terminate()
-        return {"server": server, "url": None, "log": str(log_path)}
+        return {"server": server, "url": None, "proxy": None,
+                "port": port, "log": str(log_path)}
 
-    _log("Servidor no ar. Abrindo o endereço HTTPS…")
+    _log("Servidor no ar. Abrindo os endereços HTTPS…")
     url, tunnel = _open_tunnel(port)
-    if not url:
-        url = _colab_proxy_url(port)
-        if url:
-            _log(
-                "O túnel público não subiu. Usando o endereço interno do Colab,"
-                " que só funciona neste mesmo navegador."
-            )
+    proxy = _colab_proxy_url(port)
+
+    _log("\n" + "=" * 60)
+    _log("  OMNIVOICE STUDIO PRONTO")
+    _log("=" * 60)
 
     if url:
-        _log("\n" + "=" * 58)
-        _log("  OMNIVOICE STUDIO PRONTO")
-        _log("=" * 58)
-        _log(f"\n  ABRIR NO CELULAR:  {url}\n")
-        if config.get("backend") == "mock":
-            _log("  Modo simulador: a interface funciona, mas o áudio")
-            _log("  gerado não é fala de verdade.\n")
-        if not config.get("persist_dir"):
-            _log("  Sem Drive: os dados desta sessão são temporários.\n")
-        _log("  Mantenha esta célula rodando enquanto usar o Studio.")
-        _log("=" * 58 + "\n")
+        _log("\n  1) LINK PÚBLICO (qualquer aparelho):")
+        _log(f"     {url}")
+    if proxy:
+        _log("\n  2) LINK DO COLAB (só neste navegador, mas não cai):")
+        _log(f"     {proxy}")
+
+    if not url and not proxy:
+        _log(
+            f"\n  Nenhum endereço HTTPS subiu. O servidor está na porta {port}."
+            "\n  Rode esta célula novamente."
+        )
     else:
         _log(
-            "Não foi possível abrir nenhum endereço HTTPS.\n"
-            f"O servidor está rodando na porta {port}. Rode esta célula de novo"
-            " — o túnel costuma subir na segunda tentativa."
+            "\n  ATENÇÃO: estes endereços mudam a cada execução."
+            "\n  Um link de uma sessão anterior sempre dará erro 1033."
         )
 
-    return {"server": server, "tunnel": tunnel, "url": url, "log": str(log_path)}
+    if config.get("backend") == "mock":
+        _log("\n  Modo simulador: a interface funciona, mas o áudio")
+        _log("  gerado não é fala de verdade.")
+    if not config.get("persist_dir"):
+        _log("\n  Sem Drive: os dados desta sessão são temporários.")
+
+    _log("\n  Mantenha esta célula rodando enquanto usar o Studio.")
+    _log("=" * 60 + "\n")
+
+    return {
+        "server": server,
+        "tunnel": tunnel,
+        "url": url,
+        "proxy": proxy,
+        "port": port,
+        "log": str(log_path),
+    }
 
 
 def tunnel_alive(session: dict) -> bool:
@@ -417,14 +433,102 @@ def keep_alive(session: dict, port: int = 8080, check_every: float = 30.0) -> No
                 failures = 0
             elif failures >= 3:
                 _log(
-                    "Não consegui reabrir o túnel. Rode esta célula novamente"
-                    " para tentar de novo."
+                    "Não consegui reabrir o túnel. Rode esta célula novamente,"
+                    " ou use o link do Colab, que não depende de túnel."
                 )
                 return
     except KeyboardInterrupt:
         _log("Encerrando o Studio…")
+        return
     finally:
+        if server is not None and server.poll() is not None:
+            _log(
+                "\n  O SERVIDOR PAROU — é por isso que os links dão erro 1033."
+                f"\n  Veja o motivo com:  !tail -40 {session.get('log')}"
+            )
         for key in ("tunnel", "server"):
             process = session.get(key)
             if process is not None and process.poll() is None:
                 process.terminate()
+
+
+# ---------------------------------------------------------------------------
+# Diagnóstico
+# ---------------------------------------------------------------------------
+
+
+def _tail(path: Path, lines: int = 12) -> str:
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
+    except Exception as error:
+        return f"(não consegui ler {path}: {error})"
+
+
+def diagnose(session: dict | None = None) -> None:
+    """Imprime o estado de cada peça — servidor, porta, túnel e endereços.
+
+    Serve para saber onde o erro 1033 nasce: túnel caído, servidor caído ou
+    link de uma sessão antiga.
+    """
+    session = session or {}
+    port = session.get("port", 8080)
+
+    print("=" * 60)
+    print("  DIAGNÓSTICO DO OMNIVOICE STUDIO")
+    print("=" * 60)
+
+    server = session.get("server")
+    if server is None:
+        print("\n[servidor]  nenhum registrado nesta sessão")
+    else:
+        alive = server.poll() is None
+        print(f"\n[servidor]  {'rodando' if alive else f'MORTO (código {server.poll()})'}")
+
+    with socket.socket() as probe:
+        probe.settimeout(2.0)
+        listening = probe.connect_ex(("127.0.0.1", port)) == 0
+    print(f"[porta {port}]  {'respondendo' if listening else 'SEM RESPOSTA'}")
+
+    if listening:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/status", timeout=10
+            ) as response:
+                import json
+
+                status = json.load(response)
+            print(
+                f"[app]       ok — motor: {status['engine']['name']}"
+                f"{' (simulador)' if status['engine']['mock'] else ''}"
+                f", persistente: {status['persistent']}"
+            )
+        except Exception as error:
+            print(f"[app]       NÃO RESPONDEU: {error}")
+
+    tunnel = session.get("tunnel")
+    if tunnel is None:
+        print("[túnel]     não está em uso")
+    else:
+        print(f"[túnel]     {'rodando' if tunnel.poll() is None else 'MORTO'}")
+
+    for label, url in (("link público", session.get("url")),
+                       ("link do Colab", session.get("proxy"))):
+        if not url:
+            continue
+        try:
+            with urllib.request.urlopen(f"{url}/api/status", timeout=20) as response:
+                verdict = f"OK ({response.status})"
+        except urllib.error.HTTPError as error:
+            verdict = f"HTTP {error.code}" + (
+                "  <- o túnel não está conectado à Cloudflare"
+                if error.code in (502, 503, 530) else ""
+            )
+        except Exception as error:
+            verdict = f"falhou: {type(error).__name__}"
+        print(f"[{label}]  {url}\n              {verdict}")
+
+    print("\n--- últimas linhas do servidor ---")
+    print(_tail(Path(session.get("log", "/content/omnivoice-studio.log"))))
+    print("\n--- últimas linhas do túnel ---")
+    print(_tail(_tunnel_log()))
+    print("=" * 60)
